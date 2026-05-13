@@ -197,8 +197,9 @@ Create `.env` from `.env.example` and adjust values.
 | `MAX_UPLOAD_MB` | No | `20` | Max upload size in MB |
 | `SESSION_DAYS` | No | `30` | Session expiration |
 | `NODE_ENV` | Yes | `development` / `production` | Runtime mode |
-| `SESSION_COOKIE_SECURE` | No | `true` | Forces secure cookies (default true in production) |
-| `SESSION_COOKIE_DOMAIN` | No | `.example.com` | Optional cookie domain (only for subdomain sharing) |
+| `SESSION_COOKIE_SECURE` | No | `true` | Forces secure cookie behavior (default true in production) |
+| `SESSION_COOKIE_DOMAIN` | No | `.example.com` | Optional cookie domain for subdomain sharing |
+| `AUTH_DEBUG` | No | `false` | Enables structured auth/session debug logging |
 
 ## Database and Prisma
 
@@ -250,7 +251,7 @@ Prisma `Decimal` is used for financial values to avoid floating-point errors.
 docker compose up -d --build
 ```
 
-For production, make sure `APP_URL` is set to the canonical `https://` host in your deployment env.
+For production deployment, set `APP_URL` to the canonical `https://` host and keep `SESSION_COOKIE_SECURE=true`.
 
 ### What happens on container startup
 
@@ -298,14 +299,13 @@ Back up:
 3. Restart container
 4. Check logs for successful `migrate deploy`
 
-### Canonical URL guardrail (important)
+### Canonical URL and ingress guardrail
 
-- Serve the app only on one canonical HTTPS host.
-- Redirect all HTTP requests to HTTPS.
-- Block or redirect direct IP access (for example `http://<server-ip>:3000`).
-- Do not mix `http://`, `https://`, hostname, and IP during user sessions.
-
-See: `deployment/nginx/house-renewal.conf.example`
+- Serve authenticated traffic from one canonical HTTPS host only.
+- Redirect all HTTP traffic to HTTPS.
+- Block direct IP/default-host access or redirect it to canonical host.
+- Do not mix `http://`, `https://`, hostname, and direct IP during a user session.
+- Use the provided example config: `deployment/nginx/house-renewal.conf.example`.
 
 ## Troubleshooting
 
@@ -337,6 +337,52 @@ docker compose build --no-cache house-renewal-app
 docker compose up -d
 ```
 
+### Login loop on VPS after setup/login
+
+Symptom:
+
+- Setup/login completes once
+- Next navigation redirects to `/login`
+- `hr_session` is missing or not sent
+
+Typical cause:
+
+- Mixed-origin or mixed-scheme access (`http` + `https`, hostname + IP)
+- Missing reverse-proxy forwarding headers for canonical HTTPS origin
+
+Required fixes:
+
+1. Enforce canonical HTTPS host in Nginx.
+2. Forward:
+   - `Host`
+   - `X-Forwarded-Host`
+   - `X-Forwarded-Proto=https`
+   - `X-Forwarded-For`
+3. Set production env:
+   - `NODE_ENV=production`
+   - `APP_URL=https://<canonical-host>`
+   - `SESSION_COOKIE_SECURE=true`
+4. Optionally set `SESSION_COOKIE_DOMAIN` only if subdomain sharing is needed.
+5. Restart app:
+
+```bash
+docker compose up -d --build
+```
+
+Verification checklist:
+
+1. Clear browser cookies.
+2. Login through canonical HTTPS URL.
+3. Confirm `hr_session` is `Secure`, `HttpOnly`, correct Domain/Path.
+4. Navigate Dashboard/Projects/Reports/Settings repeatedly with no login redirects.
+5. Confirm `http://<canonical-host>` redirects to HTTPS.
+6. Confirm direct IP/default-host traffic is blocked or redirected.
+7. If needed, temporarily set `AUTH_DEBUG=true` and inspect auth logs for cookie/session reads.
+
+Rollback note:
+
+- If HTTPS is not fully available yet, temporarily set `SESSION_COOKIE_SECURE=false` only for short-term controlled testing, then restore to `true`.
+
 ### `npm ci` lockfile mismatch in Docker build
 
 Cause: `package.json` and `package-lock.json` out of sync.
@@ -347,41 +393,6 @@ Fix:
 npm install
 git add package-lock.json package.json
 ```
-
-### Login loop on VPS after setup/login
-
-Symptom:
-
-- setup/login works once
-- subsequent clicks redirect to `/login`
-- `hr_session` cookie disappears or is not sent
-
-Typical cause:
-
-- mixed origin/scheme access (HTTP and HTTPS both reachable, or hostname + IP)
-
-Fix:
-
-1. Enforce one canonical HTTPS host in Nginx.
-2. Forward required proxy headers (`Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`).
-3. Set production env:
-   - `NODE_ENV=production`
-   - `APP_URL=https://<canonical-host>`
-   - `SESSION_COOKIE_SECURE=true`
-4. Restart:
-
-```bash
-docker compose up -d --build
-```
-
-Verification checklist:
-
-1. Clear browser cookies.
-2. Login via canonical HTTPS URL.
-3. Confirm `hr_session` exists and is `Secure` + `HttpOnly`.
-4. Navigate Dashboard/Projects/Reports/Settings repeatedly with no redirect loop.
-5. Confirm `http://<canonical-host>` redirects to HTTPS.
-6. Confirm direct IP access is blocked or redirected.
 
 ### Prisma engine/network issues locally
 

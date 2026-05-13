@@ -9,15 +9,29 @@ const SESSION_COOKIE = "hr_session";
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 const SESSION_COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN?.trim() || undefined;
 
-function envBool(name: string, fallback: boolean) {
-  const value = process.env[name];
+function parseBool(value: string | undefined, fallback: boolean) {
   if (value === undefined) {
     return fallback;
   }
-  return value.toLowerCase() === "true";
+  const normalized = value.toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+  if (normalized === "false") {
+    return false;
+  }
+  return fallback;
 }
 
-const SESSION_COOKIE_SECURE = envBool("SESSION_COOKIE_SECURE", process.env.NODE_ENV === "production");
+const SESSION_COOKIE_SECURE = parseBool(process.env.SESSION_COOKIE_SECURE, process.env.NODE_ENV === "production");
+const AUTH_DEBUG = parseBool(process.env.AUTH_DEBUG, false);
+
+function authLog(event: string, details: Record<string, unknown>) {
+  if (!AUTH_DEBUG) {
+    return;
+  }
+  console.info(`[auth] ${event}`, details);
+}
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -34,6 +48,7 @@ export async function verifyPassword(password: string, passwordHash: string) {
 export async function createSession(userId: string) {
   const rawToken = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
   const tokenHash = hashToken(rawToken);
+  const tokenHashPrefix = tokenHash.slice(0, 8);
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
 
   await db.session.create({
@@ -55,6 +70,14 @@ export async function createSession(userId: string) {
     expires: expiresAt,
     ...(SESSION_COOKIE_DOMAIN ? { domain: SESSION_COOKIE_DOMAIN } : {}),
   });
+
+  authLog("session.create", {
+    userId,
+    tokenHashPrefix,
+    secure: SESSION_COOKIE_SECURE,
+    domain: SESSION_COOKIE_DOMAIN ?? null,
+    expiresAt: expiresAt.toISOString(),
+  });
 }
 
 export async function clearSession() {
@@ -65,6 +88,7 @@ export async function clearSession() {
       where: { tokenHash: hashToken(token) },
     });
   }
+
   if (SESSION_COOKIE_DOMAIN) {
     cookieStore.set({
       name: SESSION_COOKIE,
@@ -76,9 +100,15 @@ export async function clearSession() {
       secure: SESSION_COOKIE_SECURE,
       sameSite: "lax",
     });
-    return;
+  } else {
+    cookieStore.delete(SESSION_COOKIE);
   }
-  cookieStore.delete(SESSION_COOKIE);
+
+  authLog("session.clear", {
+    hadCookie: Boolean(token),
+    secure: SESSION_COOKIE_SECURE,
+    domain: SESSION_COOKIE_DOMAIN ?? null,
+  });
 }
 
 export async function getSessionUser() {
@@ -86,12 +116,18 @@ export async function getSessionUser() {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
   if (!token) {
+    authLog("session.read", {
+      cookiePresent: false,
+      sessionFound: false,
+      reason: "missing-cookie",
+    });
     return null;
   }
 
+  const tokenHash = hashToken(token);
   const session = await db.session.findFirst({
     where: {
-      tokenHash: hashToken(token),
+      tokenHash,
       expiresAt: { gt: new Date() },
     },
     include: {
@@ -111,6 +147,13 @@ export async function getSessionUser() {
   });
 
   if (!session || !session.user.isActive) {
+    authLog("session.read", {
+      cookiePresent: true,
+      sessionFound: Boolean(session),
+      tokenHashPrefix: tokenHash.slice(0, 8),
+      userActive: session?.user.isActive ?? null,
+      reason: !session ? "session-not-found-or-expired" : "user-disabled",
+    });
     return null;
   }
 
@@ -120,6 +163,13 @@ export async function getSessionUser() {
   });
 
   const activeMembership = session.user.memberships[0] ?? null;
+  authLog("session.read", {
+    cookiePresent: true,
+    sessionFound: true,
+    tokenHashPrefix: tokenHash.slice(0, 8),
+    userId: session.user.id,
+    hasMembership: Boolean(activeMembership),
+  });
 
   return {
     userId: session.user.id,
