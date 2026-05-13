@@ -1,0 +1,24 @@
+services:
+  house-renewal-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: house-renewal-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/app/data/app.db
+      UPLOAD_DIR: /app/uploads
+      AUTH_SECRET: change-me-to-a-long-random-secret
+      APP_URL: http://localhost:3000
+      MAX_UPLOAD_MB: 20
+      SESSION_DAYS: 30
+    volumes:
+      - house_renewal_data:/app/data
+      - house_renewal_uploads:/app/uploads
+
+volumes:
+  house_renewal_data:
+  house_renewal_uploads:

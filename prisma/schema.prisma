@@ -1,0 +1,318 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+enum VendorType {
+  CONTRACTOR
+  SUPPLIER
+  CONSULTANT
+  PUBLIC_BODY
+  OTHER
+}
+
+enum ExpenseStatus {
+  DRAFT
+  PLANNED
+  ORDERED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  REIMBURSABLE
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  LOAN
+  OTHER
+}
+
+enum FundingType {
+  SAVINGS
+  LOAN
+  SUBSIDY
+  REFUND
+  SALE
+  OTHER
+}
+
+enum FundingStatus {
+  EXPECTED
+  RECEIVED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships    WorkspaceMember[]
+  uploadedFiles  FileAttachment[]
+  expensesCreated Expense[] @relation("ExpenseCreatedBy")
+  sessions       Session[]
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Workspace {
+  id              String   @id @default(cuid())
+  name            String
+  defaultCurrency String   @default("EUR")
+  locale          String   @default("hr-HR")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members    WorkspaceMember[]
+  projects   Project[]
+  vendors    Vendor[]
+  categories Category[]
+  files      FileAttachment[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(VIEWER)
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Project {
+  id                 String        @id @default(cuid())
+  workspaceId        String
+  name               String
+  description        String?
+  address            String?
+  startDate          DateTime?
+  targetEndDate      DateTime?
+  status             ProjectStatus @default(PLANNING)
+  totalPlannedBudget Decimal?
+  currency           String        @default("EUR")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rooms     Room[]
+  phases    Phase[]
+  budgets   BudgetLine[]
+  expenses  Expense[]
+  funding   FundingSource[]
+  files     FileAttachment[]
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  notes     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgets  BudgetLine[]
+  expenses Expense[]
+
+  @@unique([projectId, name])
+}
+
+model Phase {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  notes     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  budgets  BudgetLine[]
+  expenses Expense[]
+
+  @@unique([projectId, name])
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String?
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  budgets   BudgetLine[]
+  expenses  Expense[]
+
+  @@unique([workspaceId, name])
+}
+
+model Vendor {
+  id            String     @id @default(cuid())
+  workspaceId   String
+  name          String
+  type          VendorType @default(OTHER)
+  contactPerson String?
+  email         String?
+  phone         String?
+  address       String?
+  taxId         String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  budgets   BudgetLine[]
+  expenses  Expense[]
+  files     FileAttachment[]
+}
+
+model BudgetLine {
+  id                 String   @id @default(cuid())
+  projectId          String
+  categoryId         String
+  roomId             String?
+  phaseId            String?
+  vendorId           String?
+  name               String
+  plannedAmount      Decimal
+  contingencyPercent Decimal? @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id])
+  room     Room?    @relation(fields: [roomId], references: [id])
+  phase    Phase?   @relation(fields: [phaseId], references: [id])
+  vendor   Vendor?  @relation(fields: [vendorId], references: [id])
+  expenses Expense[]
+}
+
+model Expense {
+  id            String        @id @default(cuid())
+  projectId     String
+  categoryId    String
+  roomId        String?
+  phaseId       String?
+  vendorId      String?
+  budgetLineId  String?
+  createdById   String
+  title         String
+  description   String?
+  amount        Decimal
+  taxAmount     Decimal?
+  currency      String        @default("EUR")
+  expenseDate   DateTime
+  paymentDate   DateTime?
+  status        ExpenseStatus @default(DRAFT)
+  paymentMethod PaymentMethod?
+  invoiceNumber String?
+  warrantyUntil DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category   Category      @relation(fields: [categoryId], references: [id])
+  room       Room?         @relation(fields: [roomId], references: [id])
+  phase      Phase?        @relation(fields: [phaseId], references: [id])
+  vendor     Vendor?       @relation(fields: [vendorId], references: [id])
+  budgetLine BudgetLine?   @relation(fields: [budgetLineId], references: [id])
+  createdBy  User          @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  files      FileAttachment[]
+
+  @@index([projectId, expenseDate])
+}
+
+model FundingSource {
+  id           String        @id @default(cuid())
+  projectId    String
+  sourceName   String
+  type         FundingType
+  amount       Decimal
+  receivedDate DateTime?
+  status       FundingStatus @default(EXPECTED)
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model FileAttachment {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  projectId    String?
+  expenseId    String?
+  vendorId     String?
+  uploadedById String
+  originalName String
+  storedName   String
+  mimeType     String
+  sizeBytes    Int
+  storagePath  String
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  expense    Expense?  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  vendor     Vendor?   @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  uploadedBy User      @relation(fields: [uploadedById], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  entityType  String
+  entityId    String
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+}
