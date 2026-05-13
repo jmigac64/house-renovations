@@ -193,11 +193,11 @@ Create `.env` from `.env.example` and adjust values.
 | `DATABASE_URL` | Yes | `file:./dev.db` | SQLite path (dev) |
 | `UPLOAD_DIR` | Yes | `./uploads` | Attachment storage directory |
 | `AUTH_SECRET` | Yes | `change-me...` | Session/cookie secret |
-| `APP_URL` | Yes | `https://app.example.com` | Canonical public HTTPS URL |
+| `APP_URL` | Yes | `https://your-domain.example` | Public app URL (`https://` or `http://`) |
 | `MAX_UPLOAD_MB` | No | `20` | Max upload size in MB |
 | `SESSION_DAYS` | No | `30` | Session expiration |
 | `NODE_ENV` | Yes | `development` / `production` | Runtime mode |
-| `SESSION_COOKIE_SECURE` | No | `true` | Forces secure cookie behavior (default true in production) |
+| `SESSION_COOKIE_SECURE` | No | `true` | Optional override; if unset, secure-cookie default is derived from `APP_URL` scheme |
 | `SESSION_COOKIE_DOMAIN` | No | `.example.com` | Optional cookie domain for subdomain sharing |
 | `AUTH_DEBUG` | No | `false` | Enables structured auth/session debug logging |
 
@@ -251,7 +251,7 @@ Prisma `Decimal` is used for financial values to avoid floating-point errors.
 docker compose up -d --build
 ```
 
-For production deployment, set `APP_URL` to the canonical `https://` host and keep `SESSION_COOKIE_SECURE=true`.
+For deployment, set `APP_URL` to your public app URL. By default, secure-cookie behavior follows `APP_URL` scheme (`https` => secure true, `http` => secure false), unless explicitly overridden with `SESSION_COOKIE_SECURE`.
 
 ### What happens on container startup
 
@@ -299,12 +299,11 @@ Back up:
 3. Restart container
 4. Check logs for successful `migrate deploy`
 
-### Canonical URL and ingress guardrail
+### HTTPS and ingress guardrail
 
-- Serve authenticated traffic from one canonical HTTPS host only.
 - Redirect all HTTP traffic to HTTPS.
-- Block direct IP/default-host access or redirect it to canonical host.
-- Do not mix `http://`, `https://`, hostname, and direct IP during a user session.
+- Keep proxy headers consistent (`Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`).
+- Avoid mixing hostnames/IPs during the same login session.
 - Use the provided example config: `deployment/nginx/house-renewal.conf.example`.
 
 ## Troubleshooting
@@ -348,11 +347,11 @@ Symptom:
 Typical cause:
 
 - Mixed-origin or mixed-scheme access (`http` + `https`, hostname + IP)
-- Missing reverse-proxy forwarding headers for canonical HTTPS origin
+- Missing reverse-proxy forwarding headers for HTTPS origin
 
 Required fixes:
 
-1. Enforce canonical HTTPS host in Nginx.
+1. Enforce HTTPS in Nginx.
 2. Forward:
    - `Host`
    - `X-Forwarded-Host`
@@ -360,8 +359,8 @@ Required fixes:
    - `X-Forwarded-For`
 3. Set production env:
    - `NODE_ENV=production`
-   - `APP_URL=https://<canonical-host>`
-   - `SESSION_COOKIE_SECURE=true`
+   - `APP_URL=https://<your-domain>` (or `http://...` if intentionally non-TLS)
+   - Optional: `SESSION_COOKIE_SECURE=true|false` override
 4. Optionally set `SESSION_COOKIE_DOMAIN` only if subdomain sharing is needed.
 5. Restart app:
 
@@ -372,10 +371,10 @@ docker compose up -d --build
 Verification checklist:
 
 1. Clear browser cookies.
-2. Login through canonical HTTPS URL.
+2. Login through your HTTPS URL.
 3. Confirm `hr_session` is `Secure`, `HttpOnly`, correct Domain/Path.
 4. Navigate Dashboard/Projects/Reports/Settings repeatedly with no login redirects.
-5. Confirm `http://<canonical-host>` redirects to HTTPS.
+5. Confirm your `http://<domain>` redirects to HTTPS.
 6. Confirm direct IP/default-host traffic is blocked or redirected.
 7. If needed, temporarily set `AUTH_DEBUG=true` and inspect auth logs for cookie/session reads.
 

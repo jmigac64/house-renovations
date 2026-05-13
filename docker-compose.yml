@@ -12,13 +12,13 @@ services:
       DATABASE_URL: file:/app/data/app.db
       UPLOAD_DIR: /app/uploads
       AUTH_SECRET: change-me-to-a-long-random-secret
-      # Set to your canonical public HTTPS hostname.
-      APP_URL: https://app.example.com
+      # Set to your public app URL (https:// or http://).
+      APP_URL: https://your-domain.example
       MAX_UPLOAD_MB: 20
       SESSION_DAYS: 30
-      # Keep secure cookies enabled in production.
+      # Optional override. If unset, secure cookie follows APP_URL scheme.
       SESSION_COOKIE_SECURE: "true"
-      # Optional: only set when sharing cookies across subdomains (for example .example.com).
+      # Optional: only set when sharing cookies across subdomains.
       # SESSION_COOKIE_DOMAIN: .example.com
       # Optional diagnostic logging for auth/session flow.
       AUTH_DEBUG: "false"

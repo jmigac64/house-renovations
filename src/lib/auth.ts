@@ -8,6 +8,7 @@ import { db } from "@/src/lib/db";
 const SESSION_COOKIE = "hr_session";
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 const SESSION_COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN?.trim() || undefined;
+const APP_URL = process.env.APP_URL?.trim() || undefined;
 
 function parseBool(value: string | undefined, fallback: boolean) {
   if (value === undefined) {
@@ -23,7 +24,20 @@ function parseBool(value: string | undefined, fallback: boolean) {
   return fallback;
 }
 
-const SESSION_COOKIE_SECURE = parseBool(process.env.SESSION_COOKIE_SECURE, process.env.NODE_ENV === "production");
+function isHttpsUrl(url: string | undefined) {
+  if (!url) {
+    return undefined;
+  }
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return undefined;
+  }
+}
+
+const appUrlIsHttps = isHttpsUrl(APP_URL);
+const defaultSecureCookie = appUrlIsHttps ?? (process.env.NODE_ENV === "production");
+const SESSION_COOKIE_SECURE = parseBool(process.env.SESSION_COOKIE_SECURE, defaultSecureCookie);
 const AUTH_DEBUG = parseBool(process.env.AUTH_DEBUG, false);
 
 function authLog(event: string, details: Record<string, unknown>) {
@@ -76,6 +90,8 @@ export async function createSession(userId: string) {
     tokenHashPrefix,
     secure: SESSION_COOKIE_SECURE,
     domain: SESSION_COOKIE_DOMAIN ?? null,
+    appUrl: APP_URL ?? null,
+    appUrlIsHttps: appUrlIsHttps ?? null,
     expiresAt: expiresAt.toISOString(),
   });
 }
