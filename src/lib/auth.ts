@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { compare, hash } from "bcryptjs";
 import { WorkspaceRole } from "@prisma/client";
@@ -36,8 +36,7 @@ function isHttpsUrl(url: string | undefined) {
 }
 
 const appUrlIsHttps = isHttpsUrl(APP_URL);
-const defaultSecureCookie = appUrlIsHttps ?? (process.env.NODE_ENV === "production");
-const SESSION_COOKIE_SECURE = parseBool(process.env.SESSION_COOKIE_SECURE, defaultSecureCookie);
+const explicitSecureCookie = process.env.SESSION_COOKIE_SECURE;
 const AUTH_DEBUG = parseBool(process.env.AUTH_DEBUG, false);
 
 function authLog(event: string, details: Record<string, unknown>) {
@@ -45,6 +44,49 @@ function authLog(event: string, details: Record<string, unknown>) {
     return;
   }
   console.info(`[auth] ${event}`, details);
+}
+
+function parseForwardedProto(forwarded: string | null) {
+  if (!forwarded) {
+    return undefined;
+  }
+  const match = forwarded.match(/proto=([^;,\s]+)/i);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  return match[1].replace(/^"|"$/g, "").toLowerCase();
+}
+
+async function resolveCookieSecure() {
+  if (explicitSecureCookie !== undefined) {
+    return {
+      secure: parseBool(explicitSecureCookie, false),
+      source: "SESSION_COOKIE_SECURE",
+    } as const;
+  }
+
+  const headerStore = await headers();
+  const xForwardedProto = headerStore.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (xForwardedProto === "https") {
+    return { secure: true, source: "x-forwarded-proto" } as const;
+  }
+  if (xForwardedProto === "http") {
+    return { secure: false, source: "x-forwarded-proto" } as const;
+  }
+
+  const forwardedProto = parseForwardedProto(headerStore.get("forwarded"));
+  if (forwardedProto === "https") {
+    return { secure: true, source: "forwarded" } as const;
+  }
+  if (forwardedProto === "http") {
+    return { secure: false, source: "forwarded" } as const;
+  }
+
+  if (appUrlIsHttps !== undefined) {
+    return { secure: appUrlIsHttps, source: "APP_URL" } as const;
+  }
+
+  return { secure: process.env.NODE_ENV === "production", source: "NODE_ENV" } as const;
 }
 
 function hashToken(token: string) {
@@ -73,12 +115,13 @@ export async function createSession(userId: string) {
     },
   });
 
+  const { secure, source } = await resolveCookieSecure();
   const cookieStore = await cookies();
   cookieStore.set({
     name: SESSION_COOKIE,
     value: rawToken,
     httpOnly: true,
-    secure: SESSION_COOKIE_SECURE,
+    secure,
     sameSite: "lax",
     path: "/",
     expires: expiresAt,
@@ -88,7 +131,8 @@ export async function createSession(userId: string) {
   authLog("session.create", {
     userId,
     tokenHashPrefix,
-    secure: SESSION_COOKIE_SECURE,
+    secure,
+    secureSource: source,
     domain: SESSION_COOKIE_DOMAIN ?? null,
     appUrl: APP_URL ?? null,
     appUrlIsHttps: appUrlIsHttps ?? null,
@@ -98,6 +142,7 @@ export async function createSession(userId: string) {
 
 export async function clearSession() {
   const cookieStore = await cookies();
+  const { secure, source } = await resolveCookieSecure();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (token) {
     await db.session.deleteMany({
@@ -113,7 +158,7 @@ export async function clearSession() {
       path: "/",
       domain: SESSION_COOKIE_DOMAIN,
       httpOnly: true,
-      secure: SESSION_COOKIE_SECURE,
+      secure,
       sameSite: "lax",
     });
   } else {
@@ -122,7 +167,8 @@ export async function clearSession() {
 
   authLog("session.clear", {
     hadCookie: Boolean(token),
-    secure: SESSION_COOKIE_SECURE,
+    secure,
+    secureSource: source,
     domain: SESSION_COOKIE_DOMAIN ?? null,
   });
 }

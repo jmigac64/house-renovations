@@ -197,7 +197,7 @@ Create `.env` from `.env.example` and adjust values.
 | `MAX_UPLOAD_MB` | No | `20` | Max upload size in MB |
 | `SESSION_DAYS` | No | `30` | Session expiration |
 | `NODE_ENV` | Yes | `development` / `production` | Runtime mode |
-| `SESSION_COOKIE_SECURE` | No | `true` | Optional override; if unset, secure-cookie default is derived from `APP_URL` scheme |
+| `SESSION_COOKIE_SECURE` | No | unset | Optional override; if unset, secure-cookie is auto-resolved from request/proxy scheme, then `APP_URL`, then `NODE_ENV` |
 | `SESSION_COOKIE_DOMAIN` | No | `.example.com` | Optional cookie domain for subdomain sharing |
 | `AUTH_DEBUG` | No | `false` | Enables structured auth/session debug logging |
 
@@ -229,7 +229,7 @@ Prisma `Decimal` is used for financial values to avoid floating-point errors.
 
 - Email/password authentication
 - Password hashes stored with bcrypt
-- Session cookie is HTTP-only and secure in production
+- Session cookie is HTTP-only and secure flag is scheme-aware (`https` vs `http`)
 - Workspace membership checks on protected operations
 - Role checks for mutating actions
 
@@ -251,7 +251,7 @@ Prisma `Decimal` is used for financial values to avoid floating-point errors.
 docker compose up -d --build
 ```
 
-For deployment, set `APP_URL` to your public app URL. By default, secure-cookie behavior follows `APP_URL` scheme (`https` => secure true, `http` => secure false), unless explicitly overridden with `SESSION_COOKIE_SECURE`.
+For deployment, set `APP_URL` to your public app URL. By default, secure-cookie behavior is auto-resolved in this order: `SESSION_COOKIE_SECURE` override, request proxy headers (`X-Forwarded-Proto`/`Forwarded`), `APP_URL` scheme, then `NODE_ENV`.
 
 ### What happens on container startup
 
@@ -299,11 +299,11 @@ Back up:
 3. Restart container
 4. Check logs for successful `migrate deploy`
 
-### HTTPS and ingress guardrail
+### Ingress and scheme guardrail
 
-- Redirect all HTTP traffic to HTTPS.
+- If you run HTTPS publicly, redirect HTTP traffic to HTTPS.
 - Keep proxy headers consistent (`Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`).
-- Avoid mixing hostnames/IPs during the same login session.
+- Avoid mixing hostnames/IPs or schemes during the same login session.
 - Use the provided example config: `deployment/nginx/house-renewal.conf.example`.
 
 ## Troubleshooting
@@ -347,19 +347,19 @@ Symptom:
 Typical cause:
 
 - Mixed-origin or mixed-scheme access (`http` + `https`, hostname + IP)
-- Missing reverse-proxy forwarding headers for HTTPS origin
+- Missing reverse-proxy forwarding headers for request scheme
 
 Required fixes:
 
-1. Enforce HTTPS in Nginx.
+1. Enforce a single public scheme/host in Nginx (`https://` preferred, or `http://` if intentionally non-TLS).
 2. Forward:
    - `Host`
    - `X-Forwarded-Host`
-   - `X-Forwarded-Proto=https`
+   - `X-Forwarded-Proto` (must reflect actual scheme)
    - `X-Forwarded-For`
 3. Set production env:
    - `NODE_ENV=production`
-   - `APP_URL=https://<your-domain>` (or `http://...` if intentionally non-TLS)
+   - `APP_URL=https://<your-domain>` or `APP_URL=http://<your-domain>`
    - Optional: `SESSION_COOKIE_SECURE=true|false` override
 4. Optionally set `SESSION_COOKIE_DOMAIN` only if subdomain sharing is needed.
 5. Restart app:
@@ -371,16 +371,16 @@ docker compose up -d --build
 Verification checklist:
 
 1. Clear browser cookies.
-2. Login through your HTTPS URL.
-3. Confirm `hr_session` is `Secure`, `HttpOnly`, correct Domain/Path.
+2. Login through your public app URL.
+3. Confirm `hr_session` is `HttpOnly`, with `Secure` matching your scheme (`https` => set, `http` => unset), and correct Domain/Path.
 4. Navigate Dashboard/Projects/Reports/Settings repeatedly with no login redirects.
-5. Confirm your `http://<domain>` redirects to HTTPS.
+5. If HTTPS is enabled, confirm your `http://<domain>` redirects to HTTPS.
 6. Confirm direct IP/default-host traffic is blocked or redirected.
 7. If needed, temporarily set `AUTH_DEBUG=true` and inspect auth logs for cookie/session reads.
 
 Rollback note:
 
-- If HTTPS is not fully available yet, temporarily set `SESSION_COOKIE_SECURE=false` only for short-term controlled testing, then restore to `true`.
+- If ingress headers are temporarily unreliable, explicitly set `SESSION_COOKIE_SECURE=true` (HTTPS-only) or `SESSION_COOKIE_SECURE=false` (HTTP-only) as a short-term override.
 
 ### `npm ci` lockfile mismatch in Docker build
 

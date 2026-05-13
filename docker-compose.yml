@@ -16,8 +16,9 @@ services:
       APP_URL: https://your-domain.example
       MAX_UPLOAD_MB: 20
       SESSION_DAYS: 30
-      # Optional override. If unset, secure cookie follows APP_URL scheme.
-      SESSION_COOKIE_SECURE: "true"
+      # Optional override. If unset, cookie security is auto-resolved from
+      # proxy headers (X-Forwarded-Proto / Forwarded), APP_URL scheme, then NODE_ENV.
+      # SESSION_COOKIE_SECURE: "true"
       # Optional: only set when sharing cookies across subdomains.
       # SESSION_COOKIE_DOMAIN: .example.com
       # Optional diagnostic logging for auth/session flow.
