@@ -193,10 +193,12 @@ Create `.env` from `.env.example` and adjust values.
 | `DATABASE_URL` | Yes | `file:./dev.db` | SQLite path (dev) |
 | `UPLOAD_DIR` | Yes | `./uploads` | Attachment storage directory |
 | `AUTH_SECRET` | Yes | `change-me...` | Session/cookie secret |
-| `APP_URL` | Yes | `http://localhost:3000` | Public base URL |
+| `APP_URL` | Yes | `https://app.example.com` | Canonical public HTTPS URL |
 | `MAX_UPLOAD_MB` | No | `20` | Max upload size in MB |
 | `SESSION_DAYS` | No | `30` | Session expiration |
 | `NODE_ENV` | Yes | `development` / `production` | Runtime mode |
+| `SESSION_COOKIE_SECURE` | No | `true` | Forces secure cookies (default true in production) |
+| `SESSION_COOKIE_DOMAIN` | No | `.example.com` | Optional cookie domain (only for subdomain sharing) |
 
 ## Database and Prisma
 
@@ -248,6 +250,8 @@ Prisma `Decimal` is used for financial values to avoid floating-point errors.
 docker compose up -d --build
 ```
 
+For production, make sure `APP_URL` is set to the canonical `https://` host in your deployment env.
+
 ### What happens on container startup
 
 `docker/entrypoint.sh` runs:
@@ -294,6 +298,15 @@ Back up:
 3. Restart container
 4. Check logs for successful `migrate deploy`
 
+### Canonical URL guardrail (important)
+
+- Serve the app only on one canonical HTTPS host.
+- Redirect all HTTP requests to HTTPS.
+- Block or redirect direct IP access (for example `http://<server-ip>:3000`).
+- Do not mix `http://`, `https://`, hostname, and IP during user sessions.
+
+See: `deployment/nginx/house-renewal.conf.example`
+
 ## Troubleshooting
 
 ### `The table main.User does not exist`
@@ -334,6 +347,41 @@ Fix:
 npm install
 git add package-lock.json package.json
 ```
+
+### Login loop on VPS after setup/login
+
+Symptom:
+
+- setup/login works once
+- subsequent clicks redirect to `/login`
+- `hr_session` cookie disappears or is not sent
+
+Typical cause:
+
+- mixed origin/scheme access (HTTP and HTTPS both reachable, or hostname + IP)
+
+Fix:
+
+1. Enforce one canonical HTTPS host in Nginx.
+2. Forward required proxy headers (`Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`).
+3. Set production env:
+   - `NODE_ENV=production`
+   - `APP_URL=https://<canonical-host>`
+   - `SESSION_COOKIE_SECURE=true`
+4. Restart:
+
+```bash
+docker compose up -d --build
+```
+
+Verification checklist:
+
+1. Clear browser cookies.
+2. Login via canonical HTTPS URL.
+3. Confirm `hr_session` exists and is `Secure` + `HttpOnly`.
+4. Navigate Dashboard/Projects/Reports/Settings repeatedly with no redirect loop.
+5. Confirm `http://<canonical-host>` redirects to HTTPS.
+6. Confirm direct IP access is blocked or redirected.
 
 ### Prisma engine/network issues locally
 

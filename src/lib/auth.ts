@@ -7,6 +7,17 @@ import { db } from "@/src/lib/db";
 
 const SESSION_COOKIE = "hr_session";
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
+const SESSION_COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN?.trim() || undefined;
+
+function envBool(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return fallback;
+  }
+  return value.toLowerCase() === "true";
+}
+
+const SESSION_COOKIE_SECURE = envBool("SESSION_COOKIE_SECURE", process.env.NODE_ENV === "production");
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -34,12 +45,15 @@ export async function createSession(userId: string) {
   });
 
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, rawToken, {
+  cookieStore.set({
+    name: SESSION_COOKIE,
+    value: rawToken,
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: SESSION_COOKIE_SECURE,
     sameSite: "lax",
     path: "/",
     expires: expiresAt,
+    ...(SESSION_COOKIE_DOMAIN ? { domain: SESSION_COOKIE_DOMAIN } : {}),
   });
 }
 
@@ -50,6 +64,19 @@ export async function clearSession() {
     await db.session.deleteMany({
       where: { tokenHash: hashToken(token) },
     });
+  }
+  if (SESSION_COOKIE_DOMAIN) {
+    cookieStore.set({
+      name: SESSION_COOKIE,
+      value: "",
+      expires: new Date(0),
+      path: "/",
+      domain: SESSION_COOKIE_DOMAIN,
+      httpOnly: true,
+      secure: SESSION_COOKIE_SECURE,
+      sameSite: "lax",
+    });
+    return;
   }
   cookieStore.delete(SESSION_COOKIE);
 }

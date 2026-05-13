@@ -12,9 +12,14 @@ services:
       DATABASE_URL: file:/app/data/app.db
       UPLOAD_DIR: /app/uploads
       AUTH_SECRET: change-me-to-a-long-random-secret
-      APP_URL: http://localhost:3000
+      # Use your canonical public HTTPS URL.
+      APP_URL: https://app.example.com
       MAX_UPLOAD_MB: 20
       SESSION_DAYS: 30
+      # Keep secure cookies enabled in production.
+      SESSION_COOKIE_SECURE: "true"
+      # Optional: set only if you need cookie sharing across subdomains (e.g. .example.com).
+      # SESSION_COOKIE_DOMAIN: .example.com
     volumes:
       - house_renewal_data:/app/data
       - house_renewal_uploads:/app/uploads
